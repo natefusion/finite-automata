@@ -3,7 +3,7 @@
 
 (in-package :finite-automata)
 
-;; https://github.com/tkych/donuts/
+;; https://github.com/natefusion/donuts/
 (ql:quickload "donuts")
 
 (defmacro if-let ((var val) then &optional else)
@@ -132,4 +132,4 @@
       (multiple-value-bind (accepted final-state) (execute-finite-automata input accept-states graph :debug-print print-graph)
         (when print-graph
           (format t "accepted: ~a~%graph: ~a~%accept states: ~a~%final state: ~a~%parsed: ~a" accepted graph accept-states final-state regexp)
-          (when accepted (donuts:$ (:outfile "output.dot") (apply #'donuts:&& (generate-donut-commands graph)))))))))
+          (when accepted (donuts:$ (:outfile "output.dot") (donuts:& (:label expr) (apply #'donuts:&& (generate-donut-commands graph))))))))))
