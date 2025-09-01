@@ -118,6 +118,40 @@
         (crawl-empty-set-paths 0 start-state 0)
         (execute 0 start-state 0))))
 
+(defun crawl-graph (graph)
+  (labels ((recur (vertex path)
+             (loop with (edge . ends) = (cadr (assoc vertex graph))
+                   initially (when edge (return (list (list* vertex path))))
+                   for end in ends
+                   append (recur end (list* vertex path)))))
+    (loop for (vertex (edge . ends)) in graph
+          append (recur vertex nil))))
+
+(defun optimize-graph (graph accept-states)
+  (declare (optimize (debug 3)))
+  (loop with paths = (print (crawl-graph graph))
+        with new-graph = (copy-tree graph)
+        with new-accept-states = (copy-tree accept-states)
+
+        for path in paths
+        for reversed-path = (reverse path)
+        for start = (first reversed-path)
+        for start-next = (second reversed-path)
+        for end = (first path)
+
+        for (start-ends) = (cdr (assoc start new-graph))
+        when (> (length path) 1)
+          do (setf (cdr start-ends) (list* end (remove start-next (cdr start-ends))))
+
+        when (>= (length path) 3)
+          do (let ((smol-path (rest (butlast path))))
+               (setf new-graph (remove-if (lambda (x) (member (car x) smol-path)) new-graph)
+                     new-accept-states (set-difference new-accept-states smol-path)))
+
+        finally (setf new-accept-states (remove-if-not (lambda (x) (member x new-graph :key #'car)) new-accept-states))
+                (return (values new-graph new-accept-states))))
+
+
 (defun generate-donut-commands (graph)
   (declare (optimize (debug 3) (safety 3)))
   (loop for (vertex . edges-and-ends) in graph
@@ -125,11 +159,12 @@
                      append (loop for end in ends
                                   collect (donuts:-> (symbol-name vertex) (symbol-name end) :label (format nil "~a" (if (not edge) "ℇ" edge)))))))
 
-(defun fa (input expr &optional print-graph)
+(defun fa (input expr &key print-graph optimize)
   (declare (optimize (debug 3) (safety 3)))
   (let ((regexp (notate expr)))
     (multiple-value-bind (graph accept-states) (traverse-regexp regexp 'start)
       (multiple-value-bind (accepted final-state) (execute-finite-automata input accept-states graph :debug-print print-graph)
-        (when print-graph
-          (format t "accepted: ~a~%graph: ~a~%accept states: ~a~%final state: ~a~%parsed: ~a" accepted graph accept-states final-state regexp)
-          (when accepted (donuts:$ (:outfile "output.dot") (donuts:& (:label expr) (apply #'donuts:&& (generate-donut-commands graph))))))))))
+        (multiple-value-bind (optimized-graph optimized-accept-states) (optimize-graph graph accept-states)
+          (when print-graph
+            (format t "accepted: ~a~%graph: ~a~%accept states: ~a~%optimized graph: ~a~%optimized accept states: ~a~%final state: ~a~%parsed: ~a~%" accepted graph accept-states optimized-graph optimized-accept-states final-state regexp)
+            (when accepted (donuts:$ (:outfile "output.dot") (donuts:& (:label expr) (apply #'donuts:&& (generate-donut-commands (if optimize optimized-graph graph))))))))))))
