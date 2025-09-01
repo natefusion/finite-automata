@@ -152,12 +152,17 @@
                 (return (values new-graph new-accept-states))))
 
 
-(defun generate-donut-commands (graph)
+(defun generate-donut-commands (graph accept-states)
   (declare (optimize (debug 3) (safety 3)))
-  (loop for (vertex . edges-and-ends) in graph
+  (loop with accept-state-style = (list :style :filled :fillcolor :lightblue)
+        for (vertex . edges-and-ends) in graph
+        for vertex-accepted = (member vertex accept-states)
         append (loop for (edge . ends) in edges-and-ends
                      append (loop for end in ends
-                                  collect (donuts:-> (symbol-name vertex) (symbol-name end) :label (format nil "~a" (if (not edge) "ℇ" edge)))))))
+                                  for end-accepted = (member end accept-states)
+                                  collect (donuts:-> (apply #'donuts:<>2 (symbol-name vertex) (when vertex-accepted accept-state-style)) (apply #'donuts:<>2 (symbol-name end) (when end-accepted accept-state-style)) :label (format nil "~a" (if (not edge) "ℇ" edge)))))
+          into nodes-and-edges
+        finally (return nodes-and-edges)))
 
 (defun fa (input expr &key print-graph optimize)
   (declare (optimize (debug 3) (safety 3)))
@@ -167,4 +172,4 @@
         (multiple-value-bind (optimized-graph optimized-accept-states) (optimize-graph graph accept-states)
           (when print-graph
             (format t "accepted: ~a~%graph: ~a~%accept states: ~a~%optimized graph: ~a~%optimized accept states: ~a~%final state: ~a~%parsed: ~a~%" accepted graph accept-states optimized-graph optimized-accept-states final-state regexp)
-            (when accepted (donuts:$ (:outfile "output.dot") (donuts:& (:label expr) (apply #'donuts:&& (generate-donut-commands (if optimize optimized-graph graph))))))))))))
+            (when accepted (donuts:$ (:outfile "output.dot") (donuts:& (:label expr) (apply #'donuts:&& (generate-donut-commands (if optimize optimized-graph graph) accept-states)))))))))))
