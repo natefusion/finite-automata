@@ -203,15 +203,20 @@
           into nodes-and-edges
         finally (return nodes-and-edges)))
 
-(defun fa (input expr &key print-graph optimize)
+(defun fa (input expr &key expr-is-graph-and-accept-states print-graph optimize)
   (declare (optimize (debug 3) (safety 3)))
-  (let ((regexp (notate expr)))
-    (multiple-value-bind (graph accept-states) (if optimize (apply #'optimize-graph (values-list (traverse-regexp regexp 'start))) (traverse-regexp regexp 'start))
-      (multiple-value-bind (accepted final-state) (execute-finite-automata input accept-states graph :debug-print print-graph)
-        (when print-graph
-          (format t "accepted: ~a~%graph: ~a~%accept states: ~a~%final state: ~a~%parsed: ~a~%" accepted graph accept-states final-state regexp)
-          (donuts:$ (:outfile "output.dot") (donuts:& (:label (substitute #\ℇ #\# expr)) (apply #'donuts:&& (generate-donut-commands graph accept-states)))))
-        accepted))))
+  
+  (flet ((execute (graph accept-states start-state label &optional regexp)
+           (multiple-value-bind (accepted final-state) (execute-finite-automata input accept-states graph :debug-print print-graph :start-state start-state)
+             (when print-graph
+               (format t "accepted: ~a~%graph: ~a~%accept states: ~a~%final state: ~a~%parsed: ~a~%" accepted graph accept-states final-state regexp)
+               (donuts:$ (:outfile "output.dot") (donuts:& (:label label) (apply #'donuts:&& (generate-donut-commands graph accept-states)))))
+             accepted)))
+    (if expr-is-graph-and-accept-states
+        (destructuring-bind (graph accept-states start-state) expr
+          (execute graph accept-states start-state ""))
+        (multiple-value-bind (graph accept-states) (if optimize (apply #'optimize-graph (values-list (traverse-regexp (notate expr) 'start))) (traverse-regexp (notate expr) 'start))
+          (execute graph accept-states 'start (substitute #\ℇ #\# expr) (notate expr))))))
 
 (defparameter *decimal* "(-+#)(0+1+2+3+4+5+6+7+8+9)(0+1+2+3+4+5+6+7+8+9)*(.(0+1+2+3+4+5+6+7+8+9)*+#)")
 (defparameter *decimal-test* "(-+#)(0+1)(0+1)*(.(0+1)*+#)")
