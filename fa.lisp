@@ -80,9 +80,8 @@
                     (multiple-value-bind (lhs lhs-accept-state) (traverse-regexp (second regexp) lhs-vertex)
                       (multiple-value-bind (rhs rhs-accept-state) (traverse-regexp (third regexp) rhs-vertex)
                         (values (append lhs rhs (list (list vertex (cons nil (list lhs-vertex rhs-vertex))))) (append lhs-accept-state rhs-accept-state))))))
-           (cat (let ((lhs-vertex (gensym "lhs")))
-                  (multiple-value-bind (lhs lhs-accept-state) (traverse-regexp (second regexp) lhs-vertex)
-                    (loop with graph = (append lhs (list (list vertex (cons nil (list lhs-vertex)))))
+           (cat (multiple-value-bind (lhs lhs-accept-state) (traverse-regexp (second regexp) vertex)
+                    (loop with graph = lhs
                           with accept-states = nil
                           for lhs-accept in lhs-accept-state
                           do (let ((indirection-vertex (gensym "2lhs")))
@@ -92,7 +91,7 @@
                                  (if-let (x (assoc lhs-accept graph))
                                    (setf (cdr x) (list (cons nil (list* indirection-vertex (cdadr x)))))
                                    (setf graph (append (list (list lhs-accept (cons nil (list indirection-vertex)))) graph)))))
-                          finally (return (values graph accept-states))))))
+                          finally (return (values graph accept-states)))))
            (star (let ((indirection-vertex (gensym "*")))
                    (multiple-value-bind (graph accept-state) (traverse-regexp (second regexp) indirection-vertex)
                      (values (append graph (list (list vertex (cons nil (list indirection-vertex)))) (loop for accept in accept-state collect (list accept (list nil vertex))))
@@ -129,8 +128,8 @@
                       (multiple-value-bind (accepted state) (crawl-empty-set-paths idx current-state branch symbol)
                         (when accepted (return (values accepted state))))
                       (if-let (vertex (cadr (assoc symbol (cdr (assoc current-state graph)))))
-                                  (progn (debug-print symbol branch (list "CONTINUING TO " vertex)) (setf current-state vertex))
-                                  (return (progn (debug-print symbol branch (list current-state "FAIL(CANNOT CONTINUE)")) (values nil current-state))))
+                              (progn (debug-print symbol branch (list "CONTINUING TO " vertex)) (setf current-state vertex))
+                              (progn (debug-print symbol branch "DEAD END") (loop-finish)))
                    finally
                       (return (if-let (final-state (crawl-empty-paths current-state))
                                       (progn (debug-print symbol branch (list current-state "SUCCEED2")) (values t current-state))
