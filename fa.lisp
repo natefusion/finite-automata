@@ -18,7 +18,7 @@
                       (case x
                         ((#\+) '(union))
                         ((#\*) '(star))
-                        ((#\# #\ℇ) '(nil))
+                        ((#\# #\ℇ) '(empty))
                         ((#\.) '(dot))
                         ((#\-) '(-))
                         ((#\() '(|(|))
@@ -79,62 +79,42 @@
                         (rhs-vertex (gensym "+rhs")))
                     (multiple-value-bind (lhs lhs-accept-state) (traverse-regexp (second regexp) lhs-vertex)
                       (multiple-value-bind (rhs rhs-accept-state) (traverse-regexp (third regexp) rhs-vertex)
-                        (values (append lhs rhs (list (list vertex (cons nil (list lhs-vertex rhs-vertex))))) (append lhs-accept-state rhs-accept-state))))))
-           (cat (multiple-value-bind (lhs lhs-accept-state) (traverse-regexp (second regexp) vertex)
-                    (loop with graph = lhs
-                          with accept-states = nil
-                          for lhs-accept in lhs-accept-state
-                          do (let ((indirection-vertex (gensym "2lhs")))
-                               (multiple-value-bind (rhs rhs-accept-state) (traverse-regexp (third regexp) indirection-vertex)
-                                 (setf graph (append rhs graph)
-                                       accept-states (append rhs-accept-state accept-states))
-                                 (if-let (x (assoc lhs-accept graph))
-                                   (setf (cdr x) (list (cons nil (list* indirection-vertex (cdadr x)))))
-                                   (setf graph (append (list (list lhs-accept (cons nil (list indirection-vertex)))) graph)))))
-                          finally (return (values graph accept-states)))))
-           (star (let ((indirection-vertex (gensym "*")))
+                        (values (append lhs rhs (list (list vertex (cons 'empty (list lhs-vertex rhs-vertex)))))
+                                (append lhs-accept-state rhs-accept-state))))))
+           (cat (let ((rhs-vertex (gensym "rhs")))
+                  (multiple-value-bind (lhs lhs-accept-state) (traverse-regexp (second regexp) vertex)
+                    (multiple-value-bind (rhs rhs-accept-state) (traverse-regexp (third regexp) rhs-vertex)
+                      (values (append lhs rhs (loop for accept in lhs-accept-state collect (list accept (list 'empty rhs-vertex))))
+                              rhs-accept-state)))))
+           (star (let ((indirection-vertex (gensym "*"))
+                       (indirection2-vertex (gensym "2*")))
                    (multiple-value-bind (graph accept-state) (traverse-regexp (second regexp) indirection-vertex)
-                     (values (append graph (list (list vertex (cons nil (list indirection-vertex)))) (loop for accept in accept-state collect (list accept (list nil vertex))))
-                             (list vertex)))))
-           (otherwise (error "wut operation is this: ~a" (first regexp)))))))
+                     (values (append graph
+                                     (list (list vertex (list 'empty indirection-vertex indirection2-vertex)))
+                                     (loop for accept in accept-state collect (list accept (list 'empty indirection-vertex indirection2-vertex))))
+                             (list indirection2-vertex)))))
+                    (otherwise (error "wut operation is this: ~a" (first regexp)))))))
+
+(defun get-empty-closure (state graph)
+  (declare (optimize (debug 3)))
+  (let ((list (cdr (assoc 'empty (cdr (assoc state graph))))))
+    (if (null list)
+        (list state)
+        (loop for s in list append (get-empty-closure s graph)))))
 
 (defun execute-finite-automata (input accept-states graph &key (start-state 'start) debug-print)
-  (declare (optimize (debug 3) (safety 3)))
-  (labels ((debug-print (symbol branch custom)
-             (when debug-print (format t "b~a ~a '~a'~%" branch custom symbol)))
-           (crawl-empty-set-paths (idx current-state branch &optional symbol)
-             (let ((empty-set-vertex (cdr (assoc nil (cdr (assoc current-state graph))))))
-               (if (>= (length empty-set-vertex) 1)
-                   (let ((cnt 0))
-                     (dolist (v empty-set-vertex)
-                       (multiple-value-bind (accepted state) (execute idx v (+ (* cnt 11) (1+ branch)))
-                         (if accepted
-                             (return (progn (debug-print symbol branch (list current-state "SUCCEED0")) (values t state))) ))
-                       (incf cnt)))
-                   (values nil current-state))))
-           (crawl-empty-paths (current-state)
-             (debug-print nil -1 (list "CHECKING" current-state))
-             (if (find current-state accept-states)
-                 current-state
-                 (let ((empty-set-vertex (cdr (assoc nil (cdr (assoc current-state graph))))))
-                   (when (>= (length empty-set-vertex) 1)
-                     (dolist (v empty-set-vertex)
-                       (if-let (final-state (crawl-empty-paths v))
-                               (return final-state)))))))
-           (execute (start-idx current-state branch)
-             (loop for idx from start-idx below (length input)
-                   for symbol = (car (lexer (string (char input idx))))
-                   do (debug-print symbol branch (list current-state "idx" idx))
-                      (multiple-value-bind (accepted state) (crawl-empty-set-paths idx current-state branch symbol)
-                        (when accepted (return (values accepted state))))
-                      (if-let (vertex (cadr (assoc symbol (cdr (assoc current-state graph)))))
-                              (progn (debug-print symbol branch (list "CONTINUING TO " vertex)) (setf current-state vertex))
-                              (progn (debug-print symbol branch "DEAD END") (loop-finish)))
-                   finally
-                      (return (if-let (final-state (crawl-empty-paths current-state))
-                                      (progn (debug-print symbol branch (list current-state "SUCCEED2")) (values t current-state))
-                                      (progn (debug-print symbol branch (list current-state "FAIL2(CURRENT STATE IS NOT AN ACCEPT STATE)")) (values nil current-state)))))))
-    (execute 0 start-state 0)))
+  (declare (ignorable debug-print) (optimize (debug 3)))
+  (loop with current-states = (get-empty-closure start-state graph)
+        for char across input
+        for i from 0
+        for symbol = (car (lexer (string char)))
+        do (when debug-print (format t "input[~a]=~a, current-states ~A~%" i symbol current-states))
+           (loop for s in current-states
+                 append (loop for x in (cdr (assoc symbol (cdr (assoc s graph)))) append (get-empty-closure x graph)) into next-states
+                 finally (setf current-states (remove-duplicates next-states)))
+        finally (return (if-let (final-states (intersection current-states accept-states))
+                          (values t final-states)
+                          (values nil final-states)))))
 
 (defun crawl-graph (graph)
   (declare (optimize (debug 3)))
@@ -198,7 +178,7 @@
         append (loop for (edge . ends) in edges-and-ends
                      append (loop for end in ends
                                   for end-accepted = (member end accept-states)
-                                  collect (donuts:-> (apply #'donuts:<>2 (symbol-name vertex) (when vertex-accepted accept-state-style)) (apply #'donuts:<>2 (symbol-name end) (when end-accepted accept-state-style)) :label (format nil "~a" (if (not edge) "ℇ" edge)))))
+                                  collect (donuts:-> (apply #'donuts:<>2 (symbol-name vertex) (when vertex-accepted accept-state-style)) (apply #'donuts:<>2 (symbol-name end) (when end-accepted accept-state-style)) :label (format nil "~a" (if (eq 'empty edge) "ℇ" edge)))))
           into nodes-and-edges
         finally (return nodes-and-edges)))
 
