@@ -68,7 +68,7 @@
     (infix->prefix 0)))
 
 (defun traverse-regexp (regexp vertex)
-    (declare (optimize (debug 3) (safety 3)))
+  (declare (optimize (debug 3) (safety 3)))
   (cond ((atom regexp)
          (let ((accept-state (gensym "sym")))
            (values (list (list vertex (list regexp accept-state)))
@@ -93,34 +93,40 @@
                                      (list (list vertex (list 'empty indirection-vertex indirection2-vertex)))
                                      (loop for accept in accept-state collect (list accept (list 'empty indirection-vertex indirection2-vertex))))
                              (list indirection2-vertex)))))
-                    (otherwise (error "wut operation is this: ~a" (first regexp)))))))
+           (otherwise (error "wut operation is this: ~a" (first regexp)))))))
 
-(defun get-empty-closure (state graph)
+(defun get-empty-closure (start-states graph)
   (declare (optimize (debug 3)))
-  (let ((list (cdr (assoc 'empty (cdr (assoc state graph))))))
-    (if (null list)
-        (list state)
-        (loop for s in list append (get-empty-closure s graph)))))
+  (loop with closure = (make-hash-table)
+        with worklist = (copy-list start-states)
+          initially (dolist (state start-states) (setf (gethash state closure) t))
+        while worklist
+        for empty-dests = (cdr (assoc 'empty (cdr (assoc (pop worklist) graph))))
+        do (dolist (dest empty-dests)
+             (unless (gethash dest closure)
+               (setf (gethash dest closure) t)
+               (push dest worklist)))
+        finally (return (loop for state being the hash-keys of closure collect state))))
 
 (defun execute-finite-automata (input accept-states graph &key (start-state 'start) debug-print)
-  (declare (ignorable debug-print) (optimize (debug 3)))
-  (loop with current-states = (get-empty-closure start-state graph)
+  (declare (optimize (debug 3)))
+  (loop with current-states = (get-empty-closure (list start-state) graph)
         for char across input
         for i from 0
         for symbol = (car (lexer (string char)))
         do (when debug-print (format t "input[~a]=~a, current-states ~A~%" i symbol current-states))
            (loop for s in current-states
-                 append (loop for x in (cdr (assoc symbol (cdr (assoc s graph)))) append (get-empty-closure x graph)) into next-states
+                 append (get-empty-closure (cdr (assoc symbol (cdr (assoc s graph)))) graph) into next-states
                  finally (setf current-states (remove-duplicates next-states)))
         finally (return (if-let (final-states (intersection current-states accept-states))
-                          (values t final-states)
-                          (values nil final-states)))))
+                                (values t final-states)
+                                (values nil final-states)))))
 
 (defun crawl-graph (graph)
   (declare (optimize (debug 3)))
   (labels ((recur (vertex path)
              (loop with (edge . ends) = (cadr (assoc vertex graph))
-                   initially (when edge (return (list (list* vertex path))))
+                     initially (when edge (return (list (list* vertex path))))
                    for end in ends
                    append (recur end (list* vertex path)))))
     (loop for (vertex (edge . ends)) in graph
